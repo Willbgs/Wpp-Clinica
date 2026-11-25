@@ -292,18 +292,35 @@ export type Lead = {
   pediuHumano: boolean;
   /** Dia + data + periodo que a CLIENTE aceitou para a avaliacao. */
   avaliacao: string;
+  /** Pergunta que ela aceitou deixar para a equipe responder. */
+  duvida: string;
 };
+
+/**
+ * Ter duvida nao e encerrar. O modelo registrava (e calava por 2 h) quem dizia
+ * "nao quero agendar ainda, tenho duvidas" sem nem perguntar qual era a duvida.
+ */
+function aindaTemDuvida(frase: string): boolean {
+  const t = frase.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (/(tirei|tirou|sem|nenhuma|era so|so essa)\b.{0,20}duvida/.test(t)) return false;
+  return /duvida|como funciona|como e feito|me explica|queria (saber|entender)|\?/.test(t);
+}
 
 /** O texto que chega no WhatsApp de quem vai atender. */
 function formatarParaHumano(lead: Lead, telefoneCliente: string): string {
   return [
-    lead.pediuHumano ? "*Cliente pediu para falar com uma pessoa*" : "*Nova cliente para avaliação*",
+    lead.pediuHumano
+      ? "*Cliente pediu para falar com uma pessoa*"
+      : lead.duvida && lead.avaliacao === "não agendada"
+        ? "*Cliente com dúvida*"
+        : "*Nova cliente para avaliação*",
     "",
     `Cliente: ${lead.nome}`,
     `WhatsApp: ${telefoneCliente}`,
     `Procedimento: ${lead.procedimento}`,
     // So importa na otomodelacao; nos outros seria uma linha vazia a toa.
     ...(lead.cidade === "não informada" ? [] : [`Cidade do atendimento: ${lead.cidade}`]),
+    ...(lead.duvida ? [`Dúvida: ${lead.duvida}`] : []),
     `Avaliação: ${lead.avaliacao}`,
     "",
     lead.avaliacao === "não agendada"
@@ -330,6 +347,22 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
     };
   }
 
+  // Encerramento precoce: sem horario e sem pedido de pessoa, so registra se a
+  // cliente encerrou mesmo (ou aceitou deixar a duvida anotada).
+  const duvida = String(args.duvida ?? "").trim();
+  if (!querMarcar && !anterior && args.pediuHumano !== true && args.pediuHumano !== "true") {
+    const frase = String(args.fraseDeEncerramento ?? "").trim();
+    if (!frase || aindaTemDuvida(frase)) {
+      return {
+        ok: false,
+        instrucao:
+          "NAO registrado: ela nao encerrou a conversa. Nao diga que avisou a equipe. Se ela tem duvida e " +
+          "nao disse qual, pergunte qual e. Se disse, responda o que souber ou pergunte se quer deixar a " +
+          "duvida anotada para a equipe responder por aqui.",
+      };
+    }
+  }
+
   const lead: Lead = {
     nome: preferir(String(args.nome ?? ""), anterior?.nome, "não informado"),
     procedimento: preferir(
@@ -340,6 +373,7 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
     pediuHumano: booleano(args.pediuHumano, anterior?.pediuHumano),
     cidade: preferir(String(args.cidade ?? ""), anterior?.cidade, "não informada"),
     avaliacao: preferir(String(args.avaliacao ?? ""), anterior?.avaliacao, "não agendada"),
+    duvida: preferir(duvida, anterior?.duvida, ""),
   };
 
   guardarLead(chatid, lead);
@@ -379,6 +413,13 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
     return {
       ok: true,
       instrucao: "Registrado. Diga que avisou a equipe e que ela continua a conversa. Nao pergunte mais nada.",
+    };
+  }
+
+  if (lead.avaliacao === "não agendada" && lead.duvida) {
+    return {
+      ok: true,
+      instrucao: "Registrado com a duvida. Diga que anotou e que a equipe responde por aqui. Nao fale em horario nem pergunte mais nada.",
     };
   }
 
@@ -440,7 +481,7 @@ export const declaracoes: FunctionDeclaration[] = [
   {
     name: "registrarLead",
     description:
-      "Registra a cliente e passa a conversa para a equipe da clinica. Chame quando tiver o nome e o procedimento de interesse E ja tiver proposto a avaliacao e ouvido a resposta. EXCECAO: se a cliente pedir para falar com uma pessoa, chame na hora com pediuHumano = true e o que tiver.",
+      "Registra a cliente e passa a conversa para a equipe da clinica. Chame quando tiver o nome e o procedimento de interesse E ja tiver proposto a avaliacao e ouvido a resposta. NAO chame se ela so disse que tem duvida ou que ainda nao quer agendar: pergunte qual e a duvida. EXCECAO: se a cliente pedir para falar com uma pessoa, chame na hora com pediuHumano = true e o que tiver.",
     parametersJsonSchema: {
       type: "object",
       properties: {
@@ -453,6 +494,17 @@ export const declaracoes: FunctionDeclaration[] = [
         cidade: {
           type: "string",
           description: "Cidade onde a cliente quer ser atendida, se ela disse. Omita se nao souber.",
+        },
+        duvida: {
+          type: "string",
+          description:
+            "A pergunta que a cliente ACEITOU deixar anotada para a equipe responder. Omita se nao houver.",
+        },
+        fraseDeEncerramento: {
+          type: "string",
+          description:
+            "Obrigatorio quando NAO ha avaliacao nem pediuHumano. Copie LITERALMENTE a mensagem em que a cliente " +
+            "encerrou a conversa, recusou marcar ou aceitou deixar a duvida anotada. Dizer que tem duvida NAO e encerrar.",
         },
         fraseDoAceite: {
           type: "string",

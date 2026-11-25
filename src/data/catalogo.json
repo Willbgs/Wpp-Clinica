@@ -1,0 +1,52 @@
+[
+  {
+    "procedimento": "Otomodelação",
+    "apelidos": "orelha orelhas modelagem",
+    "categoria": "orelhas",
+    "preco": 2000,
+    "precoForaDaCidade": 2300,
+    "disponivel": true,
+    "destaque": true
+  },
+  {
+    "procedimento": "Toxina botulínica (botox)",
+    "apelidos": "botox",
+    "categoria": "rosto",
+    "preco": 900,
+    "disponivel": true,
+    "destaque": true
+  },
+  {
+    "procedimento": "Preenchimento labial",
+    "apelidos": "preenchimento boca labio labios ácido hialurônico",
+    "categoria": "rosto",
+    "preco": 800,
+    "disponivel": true,
+    "destaque": true
+  },
+  {
+    "procedimento": "Harmonização facial",
+    "apelidos": "harmonizacao harmonização mandíbula mandibula bigode chinês chines malar mento queixo olheira olheiras",
+    "areas": "mandíbula, bigode chinês, malar, mento e olheiras",
+    "categoria": "rosto",
+    "preco": null,
+    "disponivel": true,
+    "destaque": true
+  },
+  {
+    "procedimento": "Fios de PDO",
+    "apelidos": "fios fio pdo lifting",
+    "categoria": "rosto",
+    "preco": null,
+    "disponivel": true,
+    "destaque": false
+  },
+  {
+    "procedimento": "Bioestimulador de colágeno",
+    "apelidos": "bioestimulador bioestimuladora colágeno sculptra radiesse",
+    "categoria": "rosto",
+    "preco": null,
+    "disponivel": true,
+    "destaque": false
+  }
+]

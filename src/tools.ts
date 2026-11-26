@@ -13,7 +13,8 @@ import {
   type Campo,
 } from "./catalogo";
 import type { Handler } from "./tool-runner";
-import { agendaAtiva, desmarcar, duracaoAvaliacao, horarioPorId, horariosLivres, marcar } from "./agenda";
+import { agendaAtiva, anotarNoEvento, desmarcar, duracaoAvaliacao, horarioPorId, horariosLivres, marcar } from "./agenda";
+import { avaliacaoDaCliente, esquecerAvaliacao, TAGS } from "./lembretes";
 import catalogoRaw from "./data/catalogo.json";
 
 /**
@@ -467,6 +468,106 @@ async function horariosLivresTool(args: Record<string, unknown>) {
   }
 }
 
+const nomeProfissional = () =>
+  (process.env.PROFISSIONAL_NOME ?? "").trim().split(/\s+/).slice(0, 2).join(" ") || "a profissional";
+
+/** Resposta "SIM" ao lembrete: pinta o evento de verde e avisa o grupo. */
+async function confirmarAvaliacao(args: Record<string, unknown>, chatid: string) {
+  // "REMARCAR" chegou a virar confirmacao. A frase dela nao pode falar em mudar ou cancelar.
+  const frase = normalizar(String(args.fraseDaCliente ?? ""));
+  if (/remarc|reagend|cancel|mudar|trocar|outro dia|outro horario|nao vou|nao posso|desmarc/.test(frase)) {
+    return {
+      ok: false,
+      instrucao:
+        "NAO confirmado: ela quer mudar ou cancelar. Se for remarcar, pergunte dia e periodo e use horariosLivres; " +
+        "se for cancelar, use cancelarAvaliacao.",
+    };
+  }
+  const a = avaliacaoDaCliente(chatid);
+  if (!a) {
+    return {
+      ok: false,
+      instrucao:
+        "Nao achei avaliacao marcada para ela. Pergunte o dia ou passe para a equipe (registrarLead com assunto remarcar ou cancelar).",
+    };
+  }
+  await anotarNoEvento(a.eventoId, `${TAGS.TAG_OK} pela cliente no WhatsApp]`, true).catch((e) =>
+    console.warn("[agenda] nao consegui marcar como confirmado:", e instanceof Error ? e.message : e)
+  );
+  a.confirmado = true;
+  const telefone = chatid.split("@")[0] ?? chatid;
+  notificarLead(
+    { evento: "confirmou", telefone },
+    [
+      "👍 *Cliente CONFIRMOU a avaliação*",
+      "",
+      `Cliente: ${a.nome || "não informado"}`,
+      `WhatsApp: https://wa.me/${telefone}`,
+      `Avaliação: ${a.texto}`,
+    ].join("\n"),
+    chatid
+  );
+  return {
+    ok: true,
+    instrucao: `Confirmado: ${a.texto}. Agradeca em uma frase curta e diga que a ${nomeProfissional()} espera por ela. Nao pergunte nada.`,
+  };
+}
+
+/** Uma vez por conversa: antes de cancelar, oferecer remarcar (cliente que remarca nao se perde). */
+const REMARCAR_JA_OFERECIDO = new Set<string>();
+
+/** Cliente desistiu: apaga a avaliacao da agenda e avisa o grupo. */
+async function cancelarAvaliacao(args: Record<string, unknown>, chatid: string) {
+  const a = avaliacaoDaCliente(chatid);
+  const lead = leadAnterior<Lead>(chatid);
+  const eventoId = a?.eventoId ?? lead?.eventoId;
+  // Recusar e pedir para perguntar antes fazia o modelo dizer "cancelado" sem ter cancelado.
+  // Cancela de verdade e, na mesma resposta, oferece remarcar (uma vez por conversa).
+  const oferecerRemarcar = !REMARCAR_JA_OFERECIDO.has(chatid);
+  REMARCAR_JA_OFERECIDO.add(chatid);
+  if (!eventoId) {
+    return {
+      ok: false,
+      instrucao: "Nao achei avaliacao marcada para ela. Passe para a equipe com registrarLead (assunto remarcar ou cancelar).",
+    };
+  }
+  try {
+    await desmarcar(eventoId);
+  } catch (e) {
+    console.warn("[agenda] cancelamento falhou:", e instanceof Error ? e.message : e);
+    return {
+      ok: false,
+      instrucao: "Nao consegui tirar da agenda. Diga que passou para a equipe e chame registrarLead com assunto remarcar ou cancelar.",
+    };
+  }
+  esquecerAvaliacao(chatid);
+  if (lead) {
+    const { eventoId: _removido, ...resto } = lead;
+    // Com assunto ja preenchido, um registrarLead logo depois nao manda aviso repetido.
+    guardarLead(chatid, { ...resto, avaliacao: "cancelada pela cliente", assunto: "remarcar ou cancelar" });
+  }
+  const telefone = chatid.split("@")[0] ?? chatid;
+  const motivo = String(args.motivo ?? "").trim();
+  notificarLead(
+    { evento: "cancelou", telefone },
+    [
+      "❌ *Cliente CANCELOU a avaliação* (já saiu da agenda)",
+      "",
+      `Cliente: ${a?.nome || lead?.nome || "não informado"}`,
+      `WhatsApp: https://wa.me/${telefone}`,
+      `Avaliação: ${a?.texto ?? lead?.avaliacao ?? "?"}`,
+      ...(motivo ? [`Motivo: ${motivo}`] : []),
+    ].join("\n"),
+    chatid
+  );
+  return {
+    ok: true,
+    instrucao: oferecerRemarcar
+      ? "Cancelado e tirado da agenda. Diga isso e pergunte, na mesma mensagem, se ela quer marcar outro dia."
+      : "Cancelado e tirado da agenda. Diga isso em uma frase e que ela pode remarcar quando quiser, e so.",
+  };
+}
+
 /** Uma cobranca por conversa: com agenda, registrar dia/periodo solto em vez de horario exato. */
 const HORARIO_JA_COBRADO = new Set<string>();
 
@@ -507,7 +608,9 @@ async function registrarLead(args: Record<string, unknown>, chatid: string) {
     const r = await marcar(
       h,
       `Avaliação - ${nome} (${procedimento})`,
-      `WhatsApp: https://wa.me/${telefone}\nProcedimento: ${procedimento}\nMarcado pela ${config.atendenteNome} (assistente virtual) pelo WhatsApp.`
+      `WhatsApp: https://wa.me/${telefone}\nProcedimento: ${procedimento}\n` +
+        (String(args.idioma ?? anterior?.idioma ?? "").toLowerCase() === "espanhol" ? "Idioma: espanhol\n" : "") +
+        `Marcado pela ${config.atendenteNome} (assistente virtual) pelo WhatsApp.`
     );
     if (!r.ok) {
       const outros = await horariosLivres({}).catch(() => []);
@@ -645,7 +748,10 @@ function registrarLeadSemAgenda(args: Record<string, unknown>, chatid: string) {
 
   const telefone = chatid.split("@")[0] ?? chatid;
   // Chamada repetida sem mudanca nenhuma nao gera aviso duplicado para a equipe.
-  const mudou = !anterior || JSON.stringify(anterior) !== JSON.stringify(lead);
+  // Compara campo a campo (ordem das chaves nao importa; vazio e ausente sao iguais).
+  const igual = (x: Record<string, unknown>, y: Record<string, unknown>) =>
+    [...new Set([...Object.keys(x), ...Object.keys(y)])].every((k) => String(x[k] ?? "") === String(y[k] ?? ""));
+  const mudou = !anterior || !igual(anterior, lead);
   if (mudou) notificarLead(lead, formatarParaHumano(lead, telefone, !!anterior), chatid);
 
   // A equipe assume -- o agente sai da frente.
@@ -742,6 +848,27 @@ export const declaracoes: FunctionDeclaration[] = [
               data: { type: "string", description: "Dia que ela quer, no formato DD/MM (use a lista de proximos dias). Omita se ela nao disse." },
               periodo: { type: "string", enum: ["manha", "tarde"], description: "Periodo que ela quer. Omita se nao disse." },
             },
+          },
+        } as FunctionDeclaration,
+        {
+          name: "confirmarAvaliacao",
+          description:
+            "A cliente tem avaliacao marcada (secao Avaliacao desta cliente) e CONFIRMOU que vai: sim, confirmo, ok, 👍 em resposta ao lembrete. Marca como confirmada e avisa a equipe.",
+          parametersJsonSchema: {
+            type: "object",
+            properties: {
+              fraseDaCliente: { type: "string", description: "Copie LITERALMENTE a mensagem em que ela confirmou." },
+            },
+            required: ["fraseDaCliente"],
+          },
+        } as FunctionDeclaration,
+        {
+          name: "cancelarAvaliacao",
+          description:
+            "A cliente quer CANCELAR a avaliacao marcada (nao remarcar). Tira da agenda e avisa a equipe. Para mudar de horario use horariosLivres + registrarLead.",
+          parametersJsonSchema: {
+            type: "object",
+            properties: { motivo: { type: "string", description: "Motivo, se ela disse." } },
           },
         } as FunctionDeclaration,
       ]
@@ -854,6 +981,8 @@ export const declaracoes: FunctionDeclaration[] = [
 
 export const handlers: Record<string, Handler> = {
   horariosLivres: horariosLivresTool,
+  confirmarAvaliacao,
+  cancelarAvaliacao,
   buscarProcedimento,
   listarProcedimentos,
   registrarLead,

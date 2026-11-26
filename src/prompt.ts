@@ -2,6 +2,7 @@ import { config } from "./config";
 import { blocoDeDatas, blocoDoLocal } from "./datas";
 import { categoriasPorExtenso, precoDeExemplo, totalProcedimentos } from "./tools";
 import { agendaAtiva, duracaoAvaliacao } from "./agenda";
+import { avaliacaoDaCliente } from "./lembretes";
 
 /**
  * Os dois proximos dias uteis, para os exemplos usarem data real.
@@ -39,11 +40,37 @@ function proximosDiasUteis(): { nome: string; data: string }[] {
  * Reconstruido a CADA turno, porque carrega a data de hoje.
  * Preco NUNCA entra aqui: so chega pelo retorno das ferramentas.
  */
+/**
+ * Cliente que ja tem avaliacao marcada (o lembrete chegou e ela respondeu "SIM",
+ * "remarcar"...). Sem isso a Sara via um "sim" solto e se apresentava de novo.
+ */
+function blocoDaAvaliacaoMarcada(chatid: string): string {
+  const a = avaliacaoDaCliente(chatid);
+  if (!a) return "";
+  return `
+## Avaliacao desta cliente
+Ela JA TEM avaliacao MARCADA: ${a.texto}${a.nome ? ` (nome: ${a.nome})` : ""}${
+    a.procedimento ? `, procedimento: ${a.procedimento}` : ""
+  }.${a.lembrete ? " Voce ja mandou o lembrete pedindo para ela responder SIM ou REMARCAR." : ""}${
+    a.confirmado ? " Ela ja confirmou." : ""
+  }
+- Nao se apresente de novo e nao ofereca avaliacao nova: ela ja tem.
+- "sim", "confirmo", "ok", "vou sim", 👍: chame confirmarAvaliacao e agradeca curto.
+- "REMARCAR" ou quer outro dia/horario: VOCE remarca, nao passe para a equipe. Pergunte qual dia e periodo
+  ficam melhor, chame horariosLivres, ofereca 2 horarios e registre com registrarLead + horario (o antigo
+  sai da agenda sozinho). Nao use assunto "remarcar ou cancelar" aqui.
+- Quer cancelar: pergunte UMA vez se prefere remarcar para outro dia; se ela mantiver, chame cancelarAvaliacao.
+- Imprevisto, atraso ou duvida sobre o dia: responda o que souber ou chame registrarLead com assunto "remarcar ou cancelar".
+`;
+}
+
 export function buildSystemPrompt(chatid = ""): string {
   const [d1, d2] = proximosDiasUteis();
   // DDI do numero: +52 e Mexico. So decide o idioma da PRIMEIRA mensagem; depois
   // vale o idioma em que a cliente escreve.
   const doMexico = chatid.split("@")[0]!.replace(/\D/g, "").startsWith("52");
+  // Cliente com avaliacao no Google Agenda (lembrete): a Sara mesma remarca.
+  const avaliacaoMarcada = !!avaliacaoDaCliente(chatid);
   // Opcional no .env. Sem ele a Sara nao cita rede social nenhuma.
   const instagram = (process.env.EMPRESA_INSTAGRAM ?? "").trim();
   const { empresaNome, empresaCidade, atendenteNome } = config;
@@ -71,7 +98,7 @@ export function buildSystemPrompt(chatid = ""): string {
 Voce faz o PRE-atendimento no WhatsApp. Nao faz diagnostico nem fecha procedimento: entende o que a cliente quer, marca a avaliacao e passa para a equipe da clinica.${quemAtende}
 
 ${blocoDeDatas()}
-
+${blocoDaAvaliacaoMarcada(chatid)}
 ## Primeira mensagem
 Na PRIMEIRA resposta da conversa, se apresente: seu nome e a clinica. Uma vez so.
 Depois disso nunca mais se apresente.
@@ -250,9 +277,15 @@ Voce: Já avisei a equipe agora e elas falam com você o quanto antes. Se piorar
 (chame registrarLead NA HORA com assunto = "queixa apos procedimento", sem pedir nome antes. Nunca diga
 que "e normal", nunca de orientacao de cuidado. Vale para qualquer problema depois de procedimento)
 
-Cliente: tenho avaliação marcada sexta, preciso remarcar
+${
+  avaliacaoMarcada
+    ? `Cliente: REMARCAR
+Voce: Claro! Qual dia e período ficam melhor pra você?
+(ela tem avaliacao marcada por voce: VOCE remarca com horariosLivres + registrarLead com horario. Nao passe para a equipe)`
+    : `Cliente: tenho avaliação marcada sexta, preciso remarcar
 Voce: Claro, já passei pra equipe e elas remarcam com você por aqui 😊
-(registrarLead na hora com assunto = "remarcar ou cancelar". Voce nao mexe na agenda)
+(registrarLead na hora com assunto = "remarcar ou cancelar". Voce nao mexe na agenda)`
+}
 
 Cliente: sou representante de uma marca de produtos, quero apresentar pra clínica
 Voce: Legal! Já deixei seu contato com a equipe, eles te respondem por aqui.

@@ -12,6 +12,7 @@ import { ficarOnline, responderComoHumano } from "./whatsapp";
 import { estaPausado, limparPausasVencidas, pausar } from "./pausa";
 import { textoDaMidia } from "./midia";
 import { equipeConversouRecente, marcarComoDaEquipe } from "./historico";
+import { iniciarLembretes } from "./lembretes";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -288,4 +289,5 @@ app.listen(config.porta, () => {
   console.log(`[boot] ouvindo na porta ${config.porta}`);
   // Nao bloqueia o boot: se falhar, o atendimento roda igual, so sem "digitando".
   void ficarOnline();
+  iniciarLembretes();
 });

@@ -242,3 +242,36 @@ export async function desmarcar(eventoId: string): Promise<void> {
   await chamar({ acao: "apagar", id: eventoId });
   cache = undefined;
 }
+
+// ---------------------------------------------------------------------------
+// Para os lembretes
+// ---------------------------------------------------------------------------
+
+export interface EventoComWhatsApp {
+  id: string;
+  titulo: string;
+  descricao: string;
+  inicio: string;
+  fim: string;
+  criado: string;
+}
+
+/** Eventos com link wa.me na descricao (os da Sara e os que a equipe lancar com o link). */
+export async function eventosComWhatsApp(inicio: Date, fim: Date): Promise<EventoComWhatsApp[]> {
+  const r = await chamar<{ eventos?: EventoComWhatsApp[] }>({
+    acao: "eventos",
+    inicio: inicio.toISOString(),
+    fim: fim.toISOString(),
+  });
+  return r.eventos ?? [];
+}
+
+/** Acrescenta uma linha na descricao do evento ("[lembrete-24h enviado ...]"). */
+export async function anotarNoEvento(eventoId: string, texto: string, confirmar = false): Promise<void> {
+  await chamar({ acao: confirmar ? "confirmar" : "anotar", id: eventoId, texto });
+}
+
+/** "sexta-feira 27/11 às 10h15" -- mesmo formato dos horarios oferecidos. */
+export function textoDoInstante(d: Date): string {
+  return textoDoHorario(d);
+}

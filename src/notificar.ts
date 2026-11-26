@@ -17,7 +17,36 @@ import { enviarTexto } from "./whatsapp";
  * os campos do lead deste nicho. Aqui so entrega.
  */
 
+/**
+ * AVISO_GRUPO (ex: "120363...@g.us"): os avisos vao para um grupo da equipe em vez
+ * de um celular so. O numero da clinica precisa estar no grupo. Com grupo definido,
+ * HUMANO_WHATSAPP deixa de receber os avisos (e continua valendo para o filtro de teste).
+ */
+const AVISO_GRUPO = (process.env.AVISO_GRUPO ?? "").trim();
+
+async function avisarGrupo(mensagem: string): Promise<void> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  try {
+    // JID completo: enviarTexto tira tudo que nao e digito e o "@g.us" se perderia.
+    const res = await fetch(`${config.uazapiUrl}/send/text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", token: config.uazapiToken },
+      body: JSON.stringify({ number: AVISO_GRUPO, text: mensagem, linkPreview: false }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`UAZAPI ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+    console.log("[notificar] aviso entregue no grupo da equipe");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function avisarHumano(mensagem: string): Promise<void> {
+  if (AVISO_GRUPO.endsWith("@g.us")) {
+    await avisarGrupo(mensagem);
+    return;
+  }
   if (!config.humanoWhatsapp) return;
   await enviarTexto(config.humanoWhatsapp, mensagem);
 }

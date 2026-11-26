@@ -190,13 +190,15 @@ export async function responder(
     );
 
     // Executa e devolve os resultados na mesma ordem.
-    const resultados = chamadas.map((c) => {
+    // Em sequencia, nao em paralelo: registrarLead depende do que a agenda acabou de marcar.
+    const resultados = [];
+    for (const c of chamadas) {
       const nome = c.name ?? "";
       const args = (c.args ?? {}) as Record<string, unknown>;
       console.log(`[agent] tool ${nome}(${JSON.stringify(args)})`);
-      const saida = executarTool(nome, args, chatid);
-      return { functionResponse: { name: nome, response: saida as Record<string, unknown> } };
-    });
+      const saida = await executarTool(nome, args, chatid);
+      resultados.push({ functionResponse: { name: nome, response: saida as Record<string, unknown> } });
+    }
 
     sessao.historico.push({ role: "user", parts: resultados });
   }

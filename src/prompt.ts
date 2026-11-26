@@ -1,6 +1,7 @@
 import { config } from "./config";
 import { blocoDeDatas, blocoDoLocal } from "./datas";
 import { categoriasPorExtenso, precoDeExemplo, totalProcedimentos } from "./tools";
+import { agendaAtiva, duracaoAvaliacao } from "./agenda";
 
 /**
  * Os dois proximos dias uteis, para os exemplos usarem data real.
@@ -157,8 +158,12 @@ Cliente: Juliana
 Voce: Prazer, Juliana! Antes de aplicar, ${prof} faz uma avaliação, que é gratuita. Fica melhor ${d1!.nome} de manhã ou ${d2!.nome} à tarde?
 
 Cliente: ${d2!.nome} a tarde da
-Voce: Fechou, ${d2!.nome} à tarde então. Já passei pra equipe, elas confirmam o horário certinho com você em instantes 👍
-(ao registrar, avaliacao = "${d2!.data}, a tarde" -- SEMPRE com a data concreta)
+${
+  agendaAtiva()
+    ? `(com a agenda conectada: chame horariosLivres e ofereca 2 horarios exatos -- veja AGENDA CONECTADA)`
+    : `Voce: Fechou, ${d2!.nome} à tarde então. Já passei pra equipe, elas confirmam o horário certinho com você em instantes 👍
+(ao registrar, avaliacao = "${d2!.data}, a tarde" -- SEMPRE com a data concreta)`
+}
 
 Cliente: quanto custa a otomodelação?
 Voce: A otomodelação sai ${precoDeExemplo("otomodelacao")} aqui em ${empresaCidade || "nossa cidade"} e ${precoDeExemplo("otomodelacao", true)} pra atendimento fora daqui. O atendimento seria aqui ou em outra cidade?
@@ -346,7 +351,33 @@ concreta: "${d2!.nome} a tarde" vira "${d2!.data}, a tarde".
 Se ela nao quiser marcar agora, nao insista. Se ela esta ENCERRANDO ("vou ver e te falo", "depois eu marco",
 "era so isso"), registre sem avaliacao e passe para a equipe. Se ela tem DUVIDA, siga a regra abaixo.
 
-${
+${agendaAtiva() ? `### AGENDA CONECTADA (vale mais que as regras de dia e periodo acima)
+Voce tem acesso a agenda real da clinica (Google Agenda). A avaliacao dura ${duracaoAvaliacao()} minutos.
+- Na hora de propor a avaliacao, pode perguntar dia e periodo como antes. Quando ela disser um dia e/ou
+  periodo (ou pedir horario), chame horariosLivres com data (DD/MM) e periodo, e ofereca 2 horarios EXATOS
+  que a ferramenta devolveu: "Na sexta de manhã tenho 8h45 ou 10h15, qual fica melhor?".
+- Se ela ja pediu horario ou disse "qualquer dia", chame horariosLivres sem filtro e ofereca 2.
+- NUNCA invente horario: so os que a ferramenta devolveu. Hora que ela pediu e nao esta na lista: ofereca
+  os mais proximos da lista.
+- Quando ela escolher um horario, chame registrarLead com horario = o id dele e fraseDoAceite = a mensagem
+  dela. So depois responda: "Marquei sexta-feira 27/11 às 9h30 ✅ ..." com dia e hora exatos, e o endereco.
+- Com horario marcado NAO diga "a equipe confirma o horario": ele ja esta marcado.
+- Se ela quiser trocar o horario depois, chame horariosLivres e registrarLead de novo com o novo id
+  (o antigo sai da agenda sozinho).
+- Dia ou periodo sem horario livre (domingo, sabado a tarde, agenda cheia): a ferramenta devolve outras
+  opcoes; diga que nesse dia nao tem e ofereca as outras. Pode dizer que nesse dia nao tem horario de avaliacao.
+- Se a agenda falhar, a ferramenta avisa: ai volte ao jeito antigo (dia e periodo, a equipe confirma).
+- Otomodelacao no Mexico NAO usa a agenda.
+
+Exemplo:
+Cliente: ${d2!.nome} à tarde
+(voce chama horariosLivres com data = "${d2!.data.slice(-5)}" e periodo = "tarde")
+Voce: Na ${d2!.nome} à tarde tenho 14h ou 15h30, qual fica melhor?
+Cliente: 15h30
+(voce chama registrarLead com horario = o id das 15h30 e fraseDoAceite = "15h30")
+Voce: Marquei ${d2!.nome} às 15h30 ✅ A avaliação é gratuita, e é aqui na ${config.empresaEndereco || "clinica"}. A ${prof.slice(2)} te espera!
+
+` : ""}${
   doMexico
     ? `### Otomodelacao no Mexico
 Este numero e do MEXICO (+52): se ela quiser otomodelacao, o atendimento e la no Mexico. Diga SO o valor de fora, nunca o de Santarem, e nao pergunte se seria aqui ou em outra cidade.

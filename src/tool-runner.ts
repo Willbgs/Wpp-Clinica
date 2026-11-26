@@ -19,15 +19,16 @@ export type Handler = (args: Record<string, unknown>, chatid: string) => unknown
  * `chatid` so importa para a tool de registro, que precisa saber se ja registrou
  * esta conversa.
  */
-export function executarTool(
+export async function executarTool(
   nome: string,
   args: Record<string, unknown>,
   chatid = "avulso"
-): unknown {
+): Promise<unknown> {
   const fn = handlers[nome];
   if (!fn) return { erro: `Ferramenta desconhecida: ${nome}` };
   try {
-    return fn(args, chatid);
+    // await: a ferramenta da agenda consulta o Google e e assincrona.
+    return await fn(args, chatid);
   } catch (e) {
     console.error(`[tools] falha em ${nome}:`, e);
     return { erro: "Falha ao consultar os dados. Diga que vai confirmar e siga a conversa." };

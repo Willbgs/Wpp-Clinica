@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     console.error("     Troque GEMINI_MODEL por um tier mais forte.");
     process.exit(1);
   }
-  const saida = executarTool(chamada.name ?? "", (chamada.args ?? {}) as Record<string, unknown>);
+  const saida = await executarTool(chamada.name ?? "", (chamada.args ?? {}) as Record<string, unknown>);
   console.log(`     ok -> ${chamada.name}(${JSON.stringify(chamada.args)})`);
   console.log(`     catalogo respondeu -> ${JSON.stringify(saida)}\n`);
 

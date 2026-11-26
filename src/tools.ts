@@ -13,6 +13,7 @@ import {
   type Campo,
 } from "./catalogo";
 import type { Handler } from "./tool-runner";
+import { agendaAtiva, desmarcar, duracaoAvaliacao, horarioPorId, horariosLivres, marcar } from "./agenda";
 import catalogoRaw from "./data/catalogo.json";
 
 /**
@@ -330,7 +331,11 @@ export type Lead = {
   idioma: string;
   /** Por que a conversa foi para a equipe. Nem todo contato e venda. */
   assunto: Assunto;
+  /** Evento que a Sara criou no Google Agenda (para mover se a cliente trocar o horario). */
+  eventoId?: string;
 };
+
+const MARCADO = "(MARCADO na agenda)";
 
 const ASSUNTOS = [
   "atendimento",
@@ -407,7 +412,9 @@ function formatarParaHumano(lead: Lead, telefoneCliente: string, atualizacao = f
         ? "*Cliente pediu para falar com uma pessoa*"
         : lead.duvida && lead.avaliacao === "não agendada"
           ? "*Cliente com dúvida*"
-          : "*Nova cliente para avaliação*",
+          : lead.avaliacao.includes(MARCADO)
+            ? "✅ *Avaliação MARCADA na agenda*"
+            : "*Nova cliente para avaliação*",
     "",
     `Cliente: ${lead.nome}`,
     // Link clicavel: abre a conversa direto no celular de quem recebe o aviso.
@@ -421,19 +428,132 @@ function formatarParaHumano(lead: Lead, telefoneCliente: string, atualizacao = f
     "",
     lead.avaliacao === "não agendada"
       ? "Assuma a conversa."
-      : "Confirme o horário e assuma a conversa.",
+      : lead.avaliacao.includes(MARCADO)
+        ? "Já está no Google Agenda. Assuma a conversa se precisar."
+        : "Confirme o horário e assuma a conversa.",
   ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Agenda
+// ---------------------------------------------------------------------------
+
+async function horariosLivresTool(args: Record<string, unknown>) {
+  if (!agendaAtiva()) {
+    return { agenda: false, instrucao: "Sem agenda conectada: proponha dia e periodo como de costume." };
+  }
+  try {
+    const filtro = { data: String(args.data ?? ""), periodo: String(args.periodo ?? "") };
+    let lista = await horariosLivres(filtro);
+    let instrucao =
+      "Ofereca no MAXIMO 2 destes horarios, com dia e hora exatos (ex: \"sexta às 9h30 ou segunda às 14h\"). " +
+      "Quando ela escolher um, chame registrarLead com horario = o id dele e fraseDoAceite = a mensagem dela.";
+    if (lista.length === 0 && (filtro.data || filtro.periodo)) {
+      lista = await horariosLivres({});
+      instrucao =
+        "Nao tem horario livre no dia/periodo que ela pediu. Diga isso e ofereca 2 destes outros, com dia e hora. " +
+        "Quando ela escolher, chame registrarLead com horario = o id.";
+    }
+    if (lista.length === 0) {
+      return { horarios: [], instrucao: "Agenda sem horario livre nas proximas semanas: diga que a equipe vai ver um horario e registre sem horario." };
+    }
+    return { horarios: lista.map((h) => ({ id: h.id, texto: h.texto })), instrucao };
+  } catch (e) {
+    console.warn("[agenda] consulta falhou:", e instanceof Error ? e.message : e);
+    return {
+      erro: "agenda fora do ar",
+      instrucao: "A agenda nao respondeu. Proponha dia e periodo como de costume e diga que a equipe confirma o horario.",
+    };
+  }
+}
+
+/** Uma cobranca por conversa: com agenda, registrar dia/periodo solto em vez de horario exato. */
+const HORARIO_JA_COBRADO = new Set<string>();
+
+/**
+ * Com `horario` (id de horariosLivres), marca no Google Agenda antes de registrar.
+ * Se a cliente trocar o horario depois, cria o novo e apaga o antigo.
+ */
+async function registrarLead(args: Record<string, unknown>, chatid: string) {
+  const id = String(args.horario ?? "").trim();
+  const anterior = leadAnterior<Lead>(chatid);
+
+  if (agendaAtiva() && !id && String(args.avaliacao ?? "").trim() && !HORARIO_JA_COBRADO.has(chatid)) {
+    HORARIO_JA_COBRADO.add(chatid);
+    return {
+      ok: false,
+      instrucao:
+        "NAO registrado: a agenda esta conectada. Chame horariosLivres (com a data/periodo que ela disse), " +
+        "ofereca horarios exatos e registre com horario = id. Nao diga que marcou.",
+    };
+  }
+  if (!id || !agendaAtiva()) return registrarLeadSemAgenda(args, chatid);
+
+  const frase = String(args.fraseDoAceite ?? "").trim();
+  if (frase && aceiteVago(frase, chatid)) {
+    return {
+      ok: false,
+      instrucao: "NAO marcado: a resposta dela nao diz QUAL horario. Pergunte qual dos dois ela prefere. Nao diga que marcou.",
+    };
+  }
+  const h = horarioPorId(id);
+  if (!h) {
+    return { ok: false, instrucao: "Esse horario nao existe ou ja passou. Chame horariosLivres de novo e ofereca outros." };
+  }
+  const nome = String(args.nome ?? anterior?.nome ?? "").trim() || "cliente";
+  const procedimento = String(args.procedimento ?? anterior?.procedimento ?? "").trim() || "a definir";
+  const telefone = chatid.split("@")[0] ?? chatid;
+  try {
+    const r = await marcar(
+      h,
+      `Avaliação - ${nome} (${procedimento})`,
+      `WhatsApp: https://wa.me/${telefone}\nProcedimento: ${procedimento}\nMarcado pela ${config.atendenteNome} (assistente virtual) pelo WhatsApp.`
+    );
+    if (!r.ok) {
+      const outros = await horariosLivres({}).catch(() => []);
+      return {
+        ok: false,
+        instrucao: "Esse horario acabou de ser ocupado. Peca desculpas e ofereca 2 destes, com dia e hora:",
+        horarios: outros.map((o) => ({ id: o.id, texto: o.texto })),
+      };
+    }
+    if (anterior?.eventoId) {
+      await desmarcar(anterior.eventoId).catch((e) =>
+        console.warn("[agenda] nao consegui apagar o horario antigo:", e instanceof Error ? e.message : e)
+      );
+    }
+    const res = registrarLeadSemAgenda(
+      { ...args, avaliacao: `${h.texto} ${MARCADO}`, eventoId: r.eventoId, _marcado: true },
+      chatid
+    ) as { ok?: boolean };
+    if (res.ok === false) return res;
+    return {
+      ok: true,
+      marcado: h.texto,
+      instrucao:
+        `MARCADO no Google Agenda: ${h.texto}. Confirme para a cliente com dia e hora exatos ` +
+        `(a avaliacao e gratuita, se ainda nao disse) e passe o endereco. Nao pergunte mais nada.`,
+    };
+  } catch (e) {
+    console.warn("[agenda] marcacao falhou:", e instanceof Error ? e.message : e);
+    return registrarLeadSemAgenda(
+      { ...args, avaliacao: `${h.texto} (NÃO entrou na agenda: marcar manualmente)`, _marcado: true },
+      chatid
+    );
+  }
 }
 
 /** Tempo para a mensagem de despedida sair antes de o agente calar. */
 const ATRASO_DA_PAUSA_MS = 15_000;
 
-function registrarLead(args: Record<string, unknown>, chatid: string) {
+function registrarLeadSemAgenda(args: Record<string, unknown>, chatid: string) {
   const anterior = leadAnterior<Lead>(chatid);
+  // Ja marcado na agenda: dia e hora sao exatos, as cobrancas de periodo nao se aplicam.
+  const jaMarcado = args._marcado === true;
 
   // Horario fantasma: o modelo as vezes registra o periodo que ELE sugeriu sem a
   // cliente ter aceitado. Sem a frase do aceite, recusa antes de gravar e pausar.
-  const querMarcar = String(args.avaliacao ?? "").trim() !== "";
+  const querMarcar = String(args.avaliacao ?? "").trim() !== "" && !jaMarcado;
   const fraseDoAceite = String(args.fraseDoAceite ?? "").trim();
   // Sem a frase do aceite, recusar fazia o modelo dizer "ja passei pra equipe" do
   // mesmo jeito -- e o contato se perdia. Melhor registrar e pedir para a equipe conferir.
@@ -477,6 +597,7 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
   // Remarcar, queixa, fornecedor, vaga: passa na hora, nao e venda para "encerrar".
   if (
     !querMarcar &&
+    !jaMarcado &&
     !anterior &&
     assunto === "atendimento" &&
     // Otomodelacao no Mexico termina quando ela diz a cidade: nao ha horario para marcar.
@@ -509,6 +630,7 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
     duvida: preferir(duvida, anterior?.duvida, ""),
     idioma: preferir(String(args.idioma ?? "").trim().toLowerCase(), anterior?.idioma, "portugues"),
     assunto: assunto !== "atendimento" ? assunto : (anterior?.assunto ?? "atendimento"),
+    ...(args.eventoId || anterior?.eventoId ? { eventoId: String(args.eventoId ?? anterior?.eventoId) } : {}),
   };
 
   guardarLead(chatid, lead);
@@ -607,6 +729,23 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
 // ---------------------------------------------------------------------------
 
 export const declaracoes: FunctionDeclaration[] = [
+  ...(agendaAtiva()
+    ? [
+        {
+          name: "horariosLivres",
+          description:
+            `Consulta o Google Agenda da clinica e devolve horarios LIVRES para a avaliacao (${duracaoAvaliacao()} min). ` +
+            "Use quando for propor a avaliacao ou quando ela disser um dia/periodo. Unica fonte de horario valida.",
+          parametersJsonSchema: {
+            type: "object",
+            properties: {
+              data: { type: "string", description: "Dia que ela quer, no formato DD/MM (use a lista de proximos dias). Omita se ela nao disse." },
+              periodo: { type: "string", enum: ["manha", "tarde"], description: "Periodo que ela quer. Omita se nao disse." },
+            },
+          },
+        } as FunctionDeclaration,
+      ]
+    : []),
   {
     name: "buscarProcedimento",
     description:
@@ -684,6 +823,12 @@ export const declaracoes: FunctionDeclaration[] = [
             "Obrigatorio quando NAO ha avaliacao nem pediuHumano. Copie LITERALMENTE a mensagem em que a cliente " +
             "encerrou a conversa, recusou marcar ou aceitou deixar a duvida anotada. Dizer que tem duvida NAO e encerrar.",
         },
+        horario: {
+          type: "string",
+          description:
+            "Com agenda: o id EXATO (ex: 2026-11-27T09:30) do horario de horariosLivres que a cliente escolheu. " +
+            "Marca no Google Agenda. Se ela trocar de horario depois, chame de novo com o novo id.",
+        },
         fraseDoAceite: {
           type: "string",
           description:
@@ -708,6 +853,7 @@ export const declaracoes: FunctionDeclaration[] = [
 ];
 
 export const handlers: Record<string, Handler> = {
+  horariosLivres: horariosLivresTool,
   buscarProcedimento,
   listarProcedimentos,
   registrarLead,

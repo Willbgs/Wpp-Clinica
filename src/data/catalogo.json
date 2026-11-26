@@ -7,7 +7,7 @@
     "precoForaDaCidade": 2300,
     "disponivel": true,
     "destaque": true,
-    "apelidos": "orelha orelhas modelagem oreja orejas otomodelacion otomodelación"
+    "apelidos": "orelha orelhas modelagem oreja orejas otomodelacion otomodelación abano"
   },
   {
     "procedimento": "Toxina botulínica (botox)",
@@ -16,7 +16,7 @@
     "preco": 900,
     "disponivel": true,
     "destaque": true,
-    "apelidos": "botox bótox toxina"
+    "apelidos": "botox bótox toxina rugas ruga testa linhas expressão expressao galinha glabela"
   },
   {
     "procedimento": "Preenchimento labial",
@@ -25,7 +25,7 @@
     "preco": 800,
     "disponivel": true,
     "destaque": true,
-    "apelidos": "preenchimento boca labio labios ácido hialurônico relleno labial rellenos labio"
+    "apelidos": "preenchimento boca labio labios ácido hialurônico relleno labial rellenos labio finos volume"
   },
   {
     "procedimento": "Harmonização facial",
@@ -44,7 +44,7 @@
     "preco": null,
     "disponivel": true,
     "destaque": false,
-    "apelidos": "fios fio pdo lifting hilos hilo tensores"
+    "apelidos": "fios fio pdo lifting hilos hilo tensores flacidez sustentação sustentacao"
   },
   {
     "procedimento": "Bioestimulador de colágeno",
@@ -53,6 +53,6 @@
     "preco": null,
     "disponivel": true,
     "destaque": false,
-    "apelidos": "bioestimulador bioestimuladora colágeno sculptra radiesse bioestimuladores colageno"
+    "apelidos": "bioestimulador bioestimuladora colágeno sculptra radiesse bioestimuladores colageno flacidez firmeza"
   }
 ]

@@ -11,6 +11,7 @@ import {
 import { ficarOnline, responderComoHumano } from "./whatsapp";
 import { estaPausado, limparPausasVencidas, pausar } from "./pausa";
 import { textoDaMidia } from "./midia";
+import { equipeConversouRecente, marcarComoDaEquipe } from "./historico";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -205,6 +206,9 @@ app.post("/webhook", (req, res) => {
 
     const chatid = msg.chatid?.trim();
     if (!chatid) return;
+    // So conversa com telefone. "@lid" (id interno), "@newsletter", "@broadcast": responder ali
+    // nao chega em ninguem -- ou chega em quem nao devia.
+    if (!chatid.endsWith("@s.whatsapp.net")) return;
 
     // Mensagem saindo do numero do negocio. Se NAO foi a gente que mandou, um humano digitou:
     // alguem assumiu a conversa e o agente tem que sair da frente. Esse e o
@@ -213,6 +217,7 @@ app.post("/webhook", (req, res) => {
       if (msg.wasSentByApi !== true) {
         pausar(chatid, config.pausaHumanoMin * 60_000, "humano assumiu a conversa");
         cancelarBuffer(chatid);
+        marcarComoDaEquipe(chatid);
       }
       return;
     }
@@ -222,7 +227,7 @@ app.post("/webhook", (req, res) => {
       if (estaPausado(chatid)) return;
       void textoDaMidia(msg)
         .then((t) => {
-          if (t && !estaPausado(chatid)) agendar(chatid, t, msg.messageid, msg.senderName);
+          if (t) return seguirSeLivre(chatid, t, msg.messageid, msg.senderName);
         })
         .catch((e) => console.warn("[midia] falhou (ignorado):", e instanceof Error ? e.message : e));
       return;
@@ -237,11 +242,27 @@ app.post("/webhook", (req, res) => {
       return;
     }
 
-    agendar(chatid, texto, msg.messageid, msg.senderName);
+    void seguirSeLivre(chatid, texto, msg.messageid, msg.senderName);
   } catch (e) {
     console.error("[webhook] payload invalido:", e);
   }
 });
+
+/**
+ * So agenda a resposta se a equipe nao estiver nesta conversa (ver historico.ts).
+ * Conversa que a equipe tocou nas ultimas horas: a Sara fica quieta e confere de novo depois.
+ */
+async function seguirSeLivre(chatid: string, texto: string, id?: string, nome?: string): Promise<void> {
+  try {
+    if (await equipeConversouRecente(chatid)) {
+      pausar(chatid, config.pausaHumanoMin * 60_000, "a equipe ja conversa com esta cliente");
+      return;
+    }
+  } catch {
+    // consulta falhou: segue como antes
+  }
+  if (!estaPausado(chatid)) agendar(chatid, texto, id, nome);
+}
 
 // ---------------------------------------------------------------------------
 // Boot

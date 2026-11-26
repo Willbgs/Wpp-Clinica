@@ -133,10 +133,18 @@ const PALAVRAS_VAZIAS = new Set([
   "quiero", "tienen", "hacer", "sale",
 ]);
 
+/** Todas as palavras do catalogo, para validar termo curto. */
+const VOCABULARIO = new Set(
+  ATIVOS.flatMap((p) => normalizar(`${p.procedimento} ${p.apelidos} ${p.categoria}`).split(" "))
+);
+
 function limparTermo(termo: string): string {
   return normalizar(termo)
     .split(" ")
     .filter((t) => !PALAVRAS_VAZIAS.has(t))
+    // Termo curto so vale se for palavra inteira do catalogo ("pdo", "fio").
+    // Sem isso o nome "Bia" casava com "laBIAl" e virava preenchimento labial.
+    .filter((t) => t.length >= 4 || VOCABULARIO.has(t))
     .join(" ");
 }
 
@@ -362,6 +370,21 @@ function aceiteVago(frase: string, chatid: string): boolean {
 }
 
 /**
+ * "pode ser amanha?" diz o dia, nao o periodo -- e o modelo completava "de manha"
+ * sozinho. Cobra uma vez por conversa; na segunda passa (ela pode nao ter preferencia).
+ */
+const PERIODO_JA_COBRADO = new Set<string>();
+function semPeriodo(frase: string, chatid: string): boolean {
+  const t = normalizar(frase);
+  const temPeriodo =
+    // \bmanha\b: "amanha" contem "manha" e passava como se ela tivesse dito o periodo.
+    /(\bmanha\b|tarde|noite|cedo|almoco|la manana|qualquer|tanto faz|primeir|primer|ultim|\d)/.test(t);
+  if (temPeriodo || PERIODO_JA_COBRADO.has(chatid)) return false;
+  PERIODO_JA_COBRADO.add(chatid);
+  return true;
+}
+
+/**
  * Ter duvida nao e encerrar. O modelo registrava (e calava por 2 h) quem dizia
  * "nao quero agendar ainda, tenho duvidas" sem nem perguntar qual era a duvida.
  */
@@ -375,8 +398,9 @@ function aindaTemDuvida(frase: string): boolean {
 }
 
 /** O texto que chega no WhatsApp de quem vai atender. */
-function formatarParaHumano(lead: Lead, telefoneCliente: string): string {
+function formatarParaHumano(lead: Lead, telefoneCliente: string, atualizacao = false): string {
   return [
+    ...(atualizacao ? ["✏️ *ATUALIZAÇÃO* (a cliente mudou algo depois do primeiro aviso)"] : []),
     lead.assunto !== "atendimento"
       ? TITULO_ASSUNTO[lead.assunto]
       : lead.pediuHumano
@@ -411,21 +435,37 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
   // cliente ter aceitado. Sem a frase do aceite, recusa antes de gravar e pausar.
   const querMarcar = String(args.avaliacao ?? "").trim() !== "";
   const fraseDoAceite = String(args.fraseDoAceite ?? "").trim();
+  // Sem a frase do aceite, recusar fazia o modelo dizer "ja passei pra equipe" do
+  // mesmo jeito -- e o contato se perdia. Melhor registrar e pedir para a equipe conferir.
   if (querMarcar && !fraseDoAceite) {
-    return {
-      ok: false,
-      instrucao:
-        "NAO registrado: falta fraseDoAceite. Se a cliente nao escolheu um dia e periodo, " +
-        "responda a ultima mensagem dela e continue a conversa sem registrar.",
-    };
+    args.avaliacao = `${String(args.avaliacao).trim()} (confirmar com a cliente)`;
   }
-  if (querMarcar && aceiteVago(fraseDoAceite, chatid)) {
+  if (querMarcar && fraseDoAceite && aceiteVago(fraseDoAceite, chatid)) {
     return {
       ok: false,
       instrucao:
         "NAO registrado: a resposta dela nao diz QUAL dia/periodo. Pergunte qual das opcoes ela prefere, " +
-        "citando as duas de novo. Nao diga que marcou.",
+        "citando as duas de novo. Nao diga que marcou nem que passou para a equipe.",
     };
+  }
+  if (querMarcar && fraseDoAceite && semPeriodo(fraseDoAceite, chatid)) {
+    return {
+      ok: false,
+      instrucao:
+        "NAO registrado: ela disse o dia mas nao o periodo. Pergunte so: de manha ou a tarde? " +
+        "Nao diga que marcou nem que passou para a equipe.",
+    };
+  }
+  const fimDeSemana = querMarcar && /^(sabado|domingo)/.test(normalizar(String(args.avaliacao)));
+  if (fimDeSemana) {
+    args.avaliacao = `${String(args.avaliacao).trim()} (pediu fim de semana: ver se a clínica atende)`;
+  }
+  // Para hoje: o modelo inventava "a tarde ja ta terminando" para recusar. A equipe decide.
+  const hoje = new Intl.DateTimeFormat("pt-BR", { timeZone: config.timezone, day: "2-digit", month: "2-digit" }).format(
+    new Date()
+  );
+  if (querMarcar && !fimDeSemana && String(args.avaliacao).includes(hoje)) {
+    args.avaliacao = `${String(args.avaliacao).trim()} (pediu para hoje: ver se ainda tem horário)`;
   }
 
   // Encerramento precoce: sem horario e sem pedido de pessoa, so registra se a
@@ -482,7 +522,9 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
   );
 
   const telefone = chatid.split("@")[0] ?? chatid;
-  notificarLead(lead, formatarParaHumano(lead, telefone), chatid);
+  // Chamada repetida sem mudanca nenhuma nao gera aviso duplicado para a equipe.
+  const mudou = !anterior || JSON.stringify(anterior) !== JSON.stringify(lead);
+  if (mudou) notificarLead(lead, formatarParaHumano(lead, telefone, !!anterior), chatid);
 
   // A equipe assume -- o agente sai da frente.
   if (config.pausarAposLead) {
@@ -499,8 +541,9 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
       ok: true,
       jaRegistrado: true,
       instrucao:
-        "Essa cliente JA estava registrada e foi atualizada. NAO registre de novo. " +
-        "So responda normalmente.",
+        (mudou
+          ? "Atualizado: a equipe recebeu a mudanca. Confirme a mudanca com as palavras dela e diga que a equipe confirma. "
+          : "Nada mudou, nao precisava registrar de novo. ") + "Nao pergunte mais nada.",
     };
   }
 
@@ -540,6 +583,15 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
       ok: true,
       instrucao:
         "Registrado SEM horario. Diga que a equipe fala com ela quando ficar melhor. Nao fale em confirmar horario.",
+    };
+  }
+
+  if (/\(pediu (fim de semana|para hoje)/.test(lead.avaliacao)) {
+    return {
+      ok: true,
+      instrucao:
+        "Registrado. Diga que anotou o dia que ela pediu e que a equipe ve se tem horario nesse dia e confirma com ela. " +
+        'NAO diga que esta marcado nem "fechado". Nao pergunte mais nada.',
     };
   }
 

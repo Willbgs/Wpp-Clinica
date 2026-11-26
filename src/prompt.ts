@@ -288,6 +288,10 @@ Voce NAO sabe quando nem onde ${prof} atende no Mexico. Nunca invente viagem, ag
 "equipe do Mexico". O IDIOMA continua sendo o que ela escreve: brasileira que mora no Mexico e escreve em
 portugues recebe resposta em portugues ("A otomodelação é feita aí no México e sai ...").
 Nao proponha dia nem periodo. A ordem e: valor -> nome -> em que cidade do Mexico ela esta -> registrar.
+"Mexico" sozinho NAO e cidade: o numero +52 nao diz a cidade. Sem a CIDADE (Puebla, Monterrey...), pergunte
+antes de registrar e nunca registre com cidade = "Mexico".
+Se ela ja disse nome e a cidade (mesmo na primeira mensagem), nao pergunte de novo: diga o valor, chame
+registrarLead nessa mesma resposta e diga que passou para a equipe combinar data e local.
 Exemplo (numero +52):
 Cliente: hola, cuánto cuesta la otomodelación?
 Voce: La otomodelación se hace allá en México y sale ${precoDeExemplo("otomodelacao", true)} (reales brasileños). ¿Cómo te llamas?
@@ -412,6 +416,11 @@ ${blocoDoLocal()}${
   }${
     config.empresaHorario
       ? "\nSobre horario: diga o horario acima e que o horario exato depende da agenda, a equipe confirma. Nunca prometa um dia ou hora especifico."
+      : ""
+  }${
+    config.empresaEndereco
+      ? `\nO endereco e da clinica em ${empresaCidade || "nossa cidade"}. Escreva igual, sem inventar ponto de referencia, CEP ou link de mapa. ` +
+        "Para otomodelacao no MEXICO NAO passe esse endereco como local: la o local a equipe combina."
       : ""
   }
 

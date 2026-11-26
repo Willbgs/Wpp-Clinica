@@ -128,7 +128,7 @@ export async function responder(
   const sessao = pegarSessao(chatid);
   // Reconstruido a cada turno: o prompt carrega a data de hoje. Montado uma vez no
   // boot, um processo que roda dias acha que ainda e o dia do deploy.
-  const systemInstruction = buildSystemPrompt();
+  const systemInstruction = buildSystemPrompt(chatid);
 
   // Contexto do nome so na primeira mensagem, para nao poluir todo turno.
   const primeira = sessao.historico.length === 0;

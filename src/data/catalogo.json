@@ -1,7 +1,7 @@
 [
   {
     "procedimento": "Otomodelação",
-    "apelidos": "orelha orelhas modelagem",
+    "apelidos": "orelha orelhas modelagem oreja orejas otomodelacion otomodelación",
     "categoria": "orelhas",
     "preco": 2000,
     "precoForaDaCidade": 2300,
@@ -10,7 +10,7 @@
   },
   {
     "procedimento": "Toxina botulínica (botox)",
-    "apelidos": "botox",
+    "apelidos": "botox bótox toxina",
     "categoria": "rosto",
     "preco": 900,
     "disponivel": true,
@@ -18,7 +18,7 @@
   },
   {
     "procedimento": "Preenchimento labial",
-    "apelidos": "preenchimento boca labio labios ácido hialurônico",
+    "apelidos": "preenchimento boca labio labios ácido hialurônico relleno labial rellenos labio",
     "categoria": "rosto",
     "preco": 800,
     "disponivel": true,
@@ -26,7 +26,7 @@
   },
   {
     "procedimento": "Harmonização facial",
-    "apelidos": "harmonizacao harmonização mandíbula mandibula bigode chinês chines malar mento queixo olheira olheiras",
+    "apelidos": "harmonizacao harmonização mandíbula mandibula bigode chinês chines malar mento queixo olheira olheiras armonizacion armonización bigote chino pómulos pomulos mentón menton barbilla ojera ojeras",
     "areas": "mandíbula, bigode chinês, malar, mento e olheiras",
     "categoria": "rosto",
     "preco": null,
@@ -35,7 +35,7 @@
   },
   {
     "procedimento": "Fios de PDO",
-    "apelidos": "fios fio pdo lifting",
+    "apelidos": "fios fio pdo lifting hilos hilo tensores",
     "categoria": "rosto",
     "preco": null,
     "disponivel": true,
@@ -43,7 +43,7 @@
   },
   {
     "procedimento": "Bioestimulador de colágeno",
-    "apelidos": "bioestimulador bioestimuladora colágeno sculptra radiesse",
+    "apelidos": "bioestimulador bioestimuladora colágeno sculptra radiesse bioestimuladores colageno",
     "categoria": "rosto",
     "preco": null,
     "disponivel": true,

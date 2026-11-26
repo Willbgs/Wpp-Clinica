@@ -124,6 +124,11 @@ const PALAVRAS_VAZIAS = new Set([
   "de", "da", "do", "das", "dos", "a", "o", "as", "os", "e", "em", "no", "na",
   "um", "uma", "pra", "para", "com", "que", "quanto", "custa", "valor", "preco",
   "fazer", "quero", "tem", "voces", "vcs", "ta", "fica", "sai",
+  // Generica demais: "limpeza facial" caia em "Harmonizacao facial".
+  "facial",
+  // Espanhol
+  "el", "la", "los", "las", "del", "y", "en", "por", "cuanto", "cuesta", "precio",
+  "quiero", "tienen", "hacer", "sale",
 ]);
 
 function limparTermo(termo: string): string {
@@ -294,6 +299,8 @@ export type Lead = {
   avaliacao: string;
   /** Pergunta que ela aceitou deixar para a equipe responder. */
   duvida: string;
+  /** "espanhol" quando a conversa foi em espanhol; a equipe continua no mesmo idioma. */
+  idioma: string;
 };
 
 /**
@@ -302,8 +309,11 @@ export type Lead = {
  */
 function aindaTemDuvida(frase: string): boolean {
   const t = frase.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  if (/(tirei|tirou|sem|nenhuma|era so|so essa)\b.{0,20}duvida/.test(t)) return false;
-  return /duvida|como funciona|como e feito|me explica|queria (saber|entender)|\?/.test(t);
+  if (/(tirei|tirou|sem|nenhuma|era so|so essa|sin|ninguna|ya no tengo|es todo)\b.{0,20}(duvida|duda)/.test(t))
+    return false;
+  return /duvida|duda|como funciona|como e feito|como se hace|me explica|explicame|queria (saber|entender)|quisiera saber|\?/.test(
+    t
+  );
 }
 
 /** O texto que chega no WhatsApp de quem vai atender. */
@@ -318,6 +328,7 @@ function formatarParaHumano(lead: Lead, telefoneCliente: string): string {
     `Cliente: ${lead.nome}`,
     `WhatsApp: ${telefoneCliente}`,
     `Procedimento: ${lead.procedimento}`,
+    ...(lead.idioma === "espanhol" ? ["Idioma: espanhol (responda em espanhol)"] : []),
     // So importa na otomodelacao; nos outros seria uma linha vazia a toa.
     ...(lead.cidade === "não informada" ? [] : [`Cidade do atendimento: ${lead.cidade}`]),
     ...(lead.duvida ? [`Dúvida: ${lead.duvida}`] : []),
@@ -374,6 +385,7 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
     cidade: preferir(String(args.cidade ?? ""), anterior?.cidade, "não informada"),
     avaliacao: preferir(String(args.avaliacao ?? ""), anterior?.avaliacao, "não agendada"),
     duvida: preferir(duvida, anterior?.duvida, ""),
+    idioma: preferir(String(args.idioma ?? "").trim().toLowerCase(), anterior?.idioma, "portugues"),
   };
 
   guardarLead(chatid, lead);
@@ -494,6 +506,11 @@ export const declaracoes: FunctionDeclaration[] = [
         cidade: {
           type: "string",
           description: "Cidade onde a cliente quer ser atendida, se ela disse. Omita se nao souber.",
+        },
+        idioma: {
+          type: "string",
+          enum: ["portugues", "espanhol"],
+          description: "Idioma em que a conversa aconteceu. 'espanhol' se a cliente falou em espanhol.",
         },
         duvida: {
           type: "string",

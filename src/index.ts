@@ -10,6 +10,7 @@ import {
 } from "./agent";
 import { ficarOnline, responderComoHumano } from "./whatsapp";
 import { estaPausado, limparPausasVencidas, pausar } from "./pausa";
+import { textoDaMidia } from "./midia";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -216,7 +217,16 @@ app.post("/webhook", (req, res) => {
       return;
     }
 
-    if (msg.type !== "text") return; // audio, imagem, sticker...
+    // Audio vira texto transcrito; foto/video/documento viram aviso; o resto e ignorado.
+    if (msg.type !== "text") {
+      if (estaPausado(chatid)) return;
+      void textoDaMidia(msg)
+        .then((t) => {
+          if (t && !estaPausado(chatid)) agendar(chatid, t, msg.messageid, msg.senderName);
+        })
+        .catch((e) => console.warn("[midia] falhou (ignorado):", e instanceof Error ? e.message : e));
+      return;
+    }
 
     const texto = msg.text?.trim();
     if (!texto) return;

@@ -160,10 +160,24 @@ function ficha(p: Procedimento) {
       procedimento: p.procedimento,
       precoFixo: true,
       preco: `${moeda(p.preco)} ${naCidade()}`,
-      precoForaDaCidade: `${moeda(p.precoForaDaCidade)} para atendimento ${foraDaCidade()}`,
+      // Sem "para atendimento": o modelo copiava a palavra em portugues no meio do espanhol.
+      precoForaDaCidade: `${moeda(p.precoForaDaCidade)} ${foraDaCidade()}`,
     };
   }
   return { procedimento: p.procedimento, precoFixo: true, preco: moeda(p.preco) };
+}
+
+/**
+ * Preco de tabela para os EXEMPLOS do prompt, tirado do mesmo catalogo da ferramenta.
+ *
+ * Com o marcador "[PRECO]" nos exemplos, o modelo as vezes mandava "[PRECO]" para
+ * a cliente. Com o valor real, o pior caso e ele repetir o valor certo.
+ */
+export function precoDeExemplo(termo: string, foraDaCidade = false): string {
+  const alvo = normalizar(termo);
+  const p = ATIVOS.find((x) => normalizar(`${x.procedimento} ${x.apelidos}`).includes(alvo));
+  if (!p || p.preco === null) return "o valor da tabela";
+  return moeda(foraDaCidade && p.precoForaDaCidade !== undefined ? p.precoForaDaCidade : p.preco);
 }
 
 /** Nome + preco, sem detalhe. */
@@ -301,7 +315,46 @@ export type Lead = {
   duvida: string;
   /** "espanhol" quando a conversa foi em espanhol; a equipe continua no mesmo idioma. */
   idioma: string;
+  /** Por que a conversa foi para a equipe. Nem todo contato e venda. */
+  assunto: Assunto;
 };
+
+const ASSUNTOS = [
+  "atendimento",
+  "remarcar ou cancelar",
+  "queixa apos procedimento",
+  "fornecedor ou parceria",
+  "vaga de emprego",
+  "outro assunto",
+] as const;
+type Assunto = (typeof ASSUNTOS)[number];
+
+/** Titulo do aviso por assunto. Queixa apos procedimento pode ser complicacao: vem marcada como urgente. */
+const TITULO_ASSUNTO: Record<Exclude<Assunto, "atendimento">, string> = {
+  "remarcar ou cancelar": "*Paciente quer remarcar ou cancelar*",
+  "queixa apos procedimento": "🚨 *URGENTE: queixa depois de procedimento* -- responda o quanto antes",
+  "fornecedor ou parceria": "*Contato de fornecedor/parceria* (não é cliente)",
+  "vaga de emprego": "*Contato sobre vaga de emprego* (não é cliente)",
+  "outro assunto": "*Contato sobre outro assunto*",
+};
+
+/**
+ * "pode ser" respondendo a "sexta de manha ou segunda a tarde?" nao diz qual.
+ * O modelo escolhia uma das duas sozinho. A frase do aceite tem que citar dia,
+ * periodo ou a opcao. Recusa so uma vez por conversa: se so havia uma opcao, o
+ * "sim" da segunda tentativa passa.
+ */
+const ACEITE_JA_COBRADO = new Set<string>();
+function aceiteVago(frase: string, chatid: string): boolean {
+  const t = normalizar(frase);
+  const citaOpcao =
+    /(segunda|terca|quarta|quinta|sexta|sabado|domingo|amanha|hoje|manha|tarde|noite|lunes|martes|miercoles|jueves|viernes|manana|primeir|primer|segund|ultim|\d)/.test(
+      t
+    );
+  if (citaOpcao || ACEITE_JA_COBRADO.has(chatid)) return false;
+  ACEITE_JA_COBRADO.add(chatid);
+  return true;
+}
 
 /**
  * Ter duvida nao e encerrar. O modelo registrava (e calava por 2 h) quem dizia
@@ -319,14 +372,17 @@ function aindaTemDuvida(frase: string): boolean {
 /** O texto que chega no WhatsApp de quem vai atender. */
 function formatarParaHumano(lead: Lead, telefoneCliente: string): string {
   return [
-    lead.pediuHumano
-      ? "*Cliente pediu para falar com uma pessoa*"
-      : lead.duvida && lead.avaliacao === "não agendada"
-        ? "*Cliente com dúvida*"
-        : "*Nova cliente para avaliação*",
+    lead.assunto !== "atendimento"
+      ? TITULO_ASSUNTO[lead.assunto]
+      : lead.pediuHumano
+        ? "*Cliente pediu para falar com uma pessoa*"
+        : lead.duvida && lead.avaliacao === "não agendada"
+          ? "*Cliente com dúvida*"
+          : "*Nova cliente para avaliação*",
     "",
     `Cliente: ${lead.nome}`,
-    `WhatsApp: ${telefoneCliente}`,
+    // Link clicavel: abre a conversa direto no celular de quem recebe o aviso.
+    `WhatsApp: https://wa.me/${telefoneCliente}`,
     `Procedimento: ${lead.procedimento}`,
     ...(lead.idioma === "espanhol" ? ["Idioma: espanhol (responda em espanhol)"] : []),
     // So importa na otomodelacao; nos outros seria uma linha vazia a toa.
@@ -349,7 +405,8 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
   // Horario fantasma: o modelo as vezes registra o periodo que ELE sugeriu sem a
   // cliente ter aceitado. Sem a frase do aceite, recusa antes de gravar e pausar.
   const querMarcar = String(args.avaliacao ?? "").trim() !== "";
-  if (querMarcar && !String(args.fraseDoAceite ?? "").trim()) {
+  const fraseDoAceite = String(args.fraseDoAceite ?? "").trim();
+  if (querMarcar && !fraseDoAceite) {
     return {
       ok: false,
       instrucao:
@@ -357,11 +414,29 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
         "responda a ultima mensagem dela e continue a conversa sem registrar.",
     };
   }
+  if (querMarcar && aceiteVago(fraseDoAceite, chatid)) {
+    return {
+      ok: false,
+      instrucao:
+        "NAO registrado: a resposta dela nao diz QUAL dia/periodo. Pergunte qual das opcoes ela prefere, " +
+        "citando as duas de novo. Nao diga que marcou.",
+    };
+  }
 
   // Encerramento precoce: sem horario e sem pedido de pessoa, so registra se a
   // cliente encerrou mesmo (ou aceitou deixar a duvida anotada).
   const duvida = String(args.duvida ?? "").trim();
-  if (!querMarcar && !anterior && args.pediuHumano !== true && args.pediuHumano !== "true") {
+  const assunto: Assunto = ASSUNTOS.includes(args.assunto as Assunto)
+    ? (args.assunto as Assunto)
+    : "atendimento";
+  // Remarcar, queixa, fornecedor, vaga: passa na hora, nao e venda para "encerrar".
+  if (
+    !querMarcar &&
+    !anterior &&
+    assunto === "atendimento" &&
+    args.pediuHumano !== true &&
+    args.pediuHumano !== "true"
+  ) {
     const frase = String(args.fraseDeEncerramento ?? "").trim();
     if (!frase || aindaTemDuvida(frase)) {
       return {
@@ -386,6 +461,7 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
     avaliacao: preferir(String(args.avaliacao ?? ""), anterior?.avaliacao, "não agendada"),
     duvida: preferir(duvida, anterior?.duvida, ""),
     idioma: preferir(String(args.idioma ?? "").trim().toLowerCase(), anterior?.idioma, "portugues"),
+    assunto: assunto !== "atendimento" ? assunto : (anterior?.assunto ?? "atendimento"),
   };
 
   guardarLead(chatid, lead);
@@ -418,6 +494,23 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
       instrucao:
         "Essa cliente JA estava registrada e foi atualizada. NAO registre de novo. " +
         "So responda normalmente.",
+    };
+  }
+
+  if (lead.assunto === "queixa apos procedimento") {
+    return {
+      ok: true,
+      instrucao:
+        "Registrado como URGENTE. Diga que ja avisou a equipe e que vao falar com ela o quanto antes. " +
+        "Diga tambem que, se piorar (dor forte, pele arroxeada ou esbranquicada se espalhando, falta de ar), " +
+        "procure um pronto-socorro na hora. Nao de outra orientacao de saude.",
+    };
+  }
+
+  if (lead.assunto !== "atendimento") {
+    return {
+      ok: true,
+      instrucao: "Registrado. Diga que passou para a equipe e que eles respondem por aqui. Nao pergunte mais nada.",
     };
   }
 
@@ -507,6 +600,15 @@ export const declaracoes: FunctionDeclaration[] = [
           type: "string",
           description: "Cidade onde a cliente quer ser atendida, se ela disse. Omita se nao souber.",
         },
+        assunto: {
+          type: "string",
+          enum: [...ASSUNTOS],
+          description:
+            "Por que a conversa vai para a equipe. 'atendimento' = interesse em procedimento (o normal). " +
+            "Os outros passam NA HORA, com o que tiver, sem pedir nome antes: 'remarcar ou cancelar' (ja tem horario " +
+            "marcado), 'queixa apos procedimento' (ja fez procedimento e esta com problema, dor, inchaco, roxo -- urgente), " +
+            "'fornecedor ou parceria', 'vaga de emprego', 'outro assunto' (nada a ver com procedimento).",
+        },
         idioma: {
           type: "string",
           enum: ["portugues", "espanhol"],
@@ -536,6 +638,7 @@ export const declaracoes: FunctionDeclaration[] = [
             "Dia da semana + DATA + periodo que a CLIENTE confirmou para a avaliacao. " +
             "SEMPRE com a data concreta, no formato 'dia-da-semana DD/MM, periodo'. " +
             "Converta 'amanha'/'sexta' usando a lista de proximos dias do seu contexto. " +
+            "Se ela pediu hora exata, acrescente no fim: 'segunda-feira 30/11, a tarde (prefere 14h)'. " +
             "Omita se ela recusou, nao respondeu ou respondeu outra coisa. NUNCA preencha com o " +
             "periodo que voce sugeriu sem ela ter aceitado.",
         },

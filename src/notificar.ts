@@ -51,13 +51,22 @@ async function avisarHumano(mensagem: string): Promise<void> {
   await enviarTexto(config.humanoWhatsapp, mensagem);
 }
 
+/**
+ * Sem LEAD_WEBHOOK_URL, o contato vai para a planilha do Google pelo mesmo Apps Script
+ * da agenda (AGENDA_URL), que reconhece o JSON e grava/atualiza a linha da cliente.
+ * PLANILHA=false desliga.
+ */
+const PLANILHA = (process.env.PLANILHA ?? "true").trim().toLowerCase() !== "false";
+const URL_AGENDA = (process.env.AGENDA_URL ?? "").trim();
+
 async function dispararWebhook(lead: Record<string, unknown>, chatid: string): Promise<void> {
-  if (!config.leadWebhookUrl) return;
+  const destino = config.leadWebhookUrl || (PLANILHA && /^https?:\/\//.test(URL_AGENDA) ? URL_AGENDA : "");
+  if (!destino) return;
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  const timer = setTimeout(() => ctrl.abort(), 25_000);
   try {
-    const res = await fetch(config.leadWebhookUrl, {
+    const res = await fetch(destino, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -68,8 +77,9 @@ async function dispararWebhook(lead: Record<string, unknown>, chatid: string): P
       }),
       signal: ctrl.signal,
     });
-    if (!res.ok) console.warn(`[notificar] webhook ${res.status} (ignorado)`);
-    else console.log("[notificar] webhook entregue");
+    const corpo = (await res.json().catch(() => ({}))) as { erro?: string };
+    if (!res.ok || corpo.erro) console.warn(`[notificar] planilha/webhook ${res.status} ${corpo.erro ?? ""} (ignorado)`);
+    else console.log(destino === URL_AGENDA ? "[notificar] contato na planilha" : "[notificar] webhook entregue");
   } finally {
     clearTimeout(timer);
   }

@@ -34,6 +34,8 @@ export interface Procedimento {
    * `null` = sem preco fixo: o valor e negociado na avaliacao e o agente nunca fala numero.
    */
   preco: number | null;
+  /** Nome em espanhol: sem ele o modelo inventava "otomodulacion". */
+  nomeEs?: string;
   /** Preco para atendimento fora da cidade da clinica, quando for diferente. */
   precoForaDaCidade?: number;
   disponivel: boolean;
@@ -147,9 +149,11 @@ function precoTexto(p: Procedimento): string {
 
 /** Ficha completa -- so depois que a cliente escolheu um. */
 function ficha(p: Procedimento) {
+  const es = p.nomeEs ? { nomeEmEspanhol: p.nomeEs } : {};
   if (p.preco === null) {
     return {
       procedimento: p.procedimento,
+      ...es,
       ...(p.areas ? { areas: p.areas } : {}),
       precoFixo: false,
       preco: "valor combinado com a profissional na avaliacao",
@@ -158,13 +162,14 @@ function ficha(p: Procedimento) {
   if (p.precoForaDaCidade !== undefined) {
     return {
       procedimento: p.procedimento,
+      ...es,
       precoFixo: true,
       preco: `${moeda(p.preco)} ${naCidade()}`,
       // Sem "para atendimento": o modelo copiava a palavra em portugues no meio do espanhol.
       precoForaDaCidade: `${moeda(p.precoForaDaCidade)} ${foraDaCidade()}`,
     };
   }
-  return { procedimento: p.procedimento, precoFixo: true, preco: moeda(p.preco) };
+  return { procedimento: p.procedimento, ...es, precoFixo: true, preco: moeda(p.preco) };
 }
 
 /**
@@ -434,6 +439,8 @@ function registrarLead(args: Record<string, unknown>, chatid: string) {
     !querMarcar &&
     !anterior &&
     assunto === "atendimento" &&
+    // Otomodelacao no Mexico termina quando ela diz a cidade: nao ha horario para marcar.
+    !normalizar(String(args.cidade ?? "")).includes("mexico") &&
     args.pediuHumano !== true &&
     args.pediuHumano !== "true"
   ) {

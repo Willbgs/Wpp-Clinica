@@ -1,52 +1,58 @@
 [
   {
     "procedimento": "Otomodelação",
-    "apelidos": "orelha orelhas modelagem oreja orejas otomodelacion otomodelación",
+    "nomeEs": "otomodelación",
     "categoria": "orelhas",
     "preco": 2000,
     "precoForaDaCidade": 2300,
     "disponivel": true,
-    "destaque": true
+    "destaque": true,
+    "apelidos": "orelha orelhas modelagem oreja orejas otomodelacion otomodelación"
   },
   {
     "procedimento": "Toxina botulínica (botox)",
-    "apelidos": "botox bótox toxina",
+    "nomeEs": "bótox (toxina botulínica)",
     "categoria": "rosto",
     "preco": 900,
     "disponivel": true,
-    "destaque": true
+    "destaque": true,
+    "apelidos": "botox bótox toxina"
   },
   {
     "procedimento": "Preenchimento labial",
-    "apelidos": "preenchimento boca labio labios ácido hialurônico relleno labial rellenos labio",
+    "nomeEs": "relleno de labios",
     "categoria": "rosto",
     "preco": 800,
     "disponivel": true,
-    "destaque": true
+    "destaque": true,
+    "apelidos": "preenchimento boca labio labios ácido hialurônico relleno labial rellenos labio"
   },
   {
     "procedimento": "Harmonização facial",
-    "apelidos": "harmonizacao harmonização mandíbula mandibula bigode chinês chines malar mento queixo olheira olheiras armonizacion armonización bigote chino pómulos pomulos mentón menton barbilla ojera ojeras",
+    "nomeEs": "armonización facial",
     "areas": "mandíbula, bigode chinês, malar, mento e olheiras",
     "categoria": "rosto",
     "preco": null,
     "disponivel": true,
-    "destaque": true
+    "destaque": true,
+    "apelidos": "harmonizacao harmonização mandíbula mandibula bigode chinês chines malar mento queixo olheira olheiras armonizacion armonización bigote chino pómulos pomulos mentón menton barbilla ojera ojeras"
   },
   {
     "procedimento": "Fios de PDO",
-    "apelidos": "fios fio pdo lifting hilos hilo tensores",
+    "nomeEs": "hilos PDO",
     "categoria": "rosto",
     "preco": null,
     "disponivel": true,
-    "destaque": false
+    "destaque": false,
+    "apelidos": "fios fio pdo lifting hilos hilo tensores"
   },
   {
     "procedimento": "Bioestimulador de colágeno",
-    "apelidos": "bioestimulador bioestimuladora colágeno sculptra radiesse bioestimuladores colageno",
+    "nomeEs": "bioestimulador de colágeno",
     "categoria": "rosto",
     "preco": null,
     "disponivel": true,
-    "destaque": false
+    "destaque": false,
+    "apelidos": "bioestimulador bioestimuladora colágeno sculptra radiesse bioestimuladores colageno"
   }
 ]

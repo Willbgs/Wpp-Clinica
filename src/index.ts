@@ -223,6 +223,11 @@ app.post("/webhook", (req, res) => {
       return;
     }
 
+    // Mensagem automatica de empresa (notificacao do TikTok, banco, cobranca com botao):
+    // nao e cliente. Vista em producao: a Sara respondia e mandava aviso para o grupo.
+    const tipo = String((msg as { messageType?: string }).messageType ?? "");
+    if (/Template|Buttons|Interactive|List(Response)?Message|Poll|Order|Product|Newsletter/i.test(tipo)) return;
+
     // Audio vira texto transcrito; foto/video/documento viram aviso; o resto e ignorado.
     if (msg.type !== "text") {
       if (estaPausado(chatid)) return;

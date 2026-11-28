@@ -197,7 +197,7 @@ export function precoDeExemplo(termo: string, foraDaCidade = false): string {
 
 /** Nome + preco, sem detalhe. */
 function resumo(p: Procedimento) {
-  return { procedimento: p.procedimento, preco: precoTexto(p) };
+  return { procedimento: p.procedimento, ...(p.nomeEs ? { nomeEmEspanhol: p.nomeEs } : {}), preco: precoTexto(p) };
 }
 
 function sugestoes(): string[] {
@@ -219,13 +219,32 @@ function instrucaoDaFicha(p: Procedimento): string {
     return (
       `Ha dois valores: um ${naCidade()} e outro para atendimento ${foraDaCidade()}. ` +
       "O que conta e onde sera o ATENDIMENTO, nao onde ela mora. Se ainda nao sabe, diga os dois " +
-      "valores numa frase e pergunte onde seria. Se ja sabe, diga so o valor que vale. Nao prometa resultado."
+      "valores numa frase e pergunte onde seria. Se ja sabe, diga so o valor que vale. Nao prometa resultado. " +
+      "Se ela falou em otoplastia: a clinica nao faz cirurgia, a otomodelacao e sem corte. Responda no idioma dela."
     );
   }
   return "Informe o preco. Nao prometa resultado. Depois siga para a proxima pergunta que falta.";
 }
 
-function buscarProcedimento(args: Record<string, unknown>) {
+function buscarProcedimento(args: Record<string, unknown>, chatid = "") {
+  const r = buscarProcedimentoBase(args);
+  // Numero do Mexico (+52): o atendimento e la, vale so o valor de fora. Em conversa real
+  // o modelo passou o preco de Santarem tambem.
+  const doMexico = chatid.split("@")[0]?.startsWith("52");
+  if (doMexico && "precoForaDaCidade" in r && r.precoForaDaCidade) {
+    const { preco: _santarem, precoForaDaCidade, ...resto } = r as typeof r & { preco: string; precoForaDaCidade: string };
+    return {
+      ...resto,
+      preco: `${String(precoForaDaCidade).split(" ")[0]} ${String(precoForaDaCidade).split(" ")[1] ?? ""}`.trim(),
+      instrucao:
+        "Cliente do Mexico: a otomodelacao e feita la no Mexico. Diga SO este valor (em reales brasileños). " +
+        "Depois pergunte o NOME e, depois, a CIDADE do Mexico. Nao fale do valor de Santarem.",
+    };
+  }
+  return r;
+}
+
+function buscarProcedimentoBase(args: Record<string, unknown>) {
   const bruto = typeof args.termo === "string" ? args.termo : "";
   const termo = limparTermo(bruto);
   if (!termo.trim()) {
@@ -243,7 +262,7 @@ function buscarProcedimento(args: Record<string, unknown>) {
       encontrado: false,
       instrucao:
         "A clinica nao tem esse procedimento. Diga que esse nao tem e ofereca as sugestoes. " +
-        "Nao invente preco nem diga que 'a equipe faz'.",
+        "Nao invente preco nem diga que 'a equipe faz'. Responda NO IDIOMA DA CLIENTE (espanhol se ela escreveu em espanhol).",
       sugestoes: sugestoes(),
     };
   }
@@ -262,7 +281,8 @@ function buscarProcedimento(args: Record<string, unknown>) {
   return { encontrado: true, ...ficha(melhor), instrucao: instrucaoDaFicha(melhor) };
 }
 
-function listarProcedimentos(args: Record<string, unknown>) {
+function listarProcedimentos(args: Record<string, unknown>, chatid = "") {
+  const doMexico = chatid.split("@")[0]?.startsWith("52");
   const cats = categoriasDisponiveis();
   const categoria =
     typeof args.categoria === "string" && cats.includes(args.categoria)
@@ -300,7 +320,10 @@ function listarProcedimentos(args: Record<string, unknown>) {
   return {
     total: filtrados.length,
     mostrando: amostra.length,
-    procedimentos: amostra.map(resumo),
+    // Numero do Mexico: otomodelacao com o valor de fora (o atendimento e la).
+    procedimentos: amostra.map((p) =>
+      doMexico && p.precoForaDaCidade !== undefined ? { ...resumo(p), preco: moeda(p.precoForaDaCidade) } : resumo(p)
+    ),
     instrucao:
       filtrados.length > 2
         ? `Ha ${filtrados.length} procedimentos. Cite no maximo 2 e faca UMA pergunta que estreite (orelhas ou rosto, o que ela quer melhorar). Nao liste todos.`
@@ -570,6 +593,8 @@ async function cancelarAvaliacao(args: Record<string, unknown>, chatid: string) 
 
 /** Uma cobranca por conversa: com agenda, registrar dia/periodo solto em vez de horario exato. */
 const HORARIO_JA_COBRADO = new Set<string>();
+/** Uma cobranca por conversa: Mexico sem nome. */
+const NOME_JA_COBRADO = new Set<string>();
 
 /**
  * Com `horario` (id de horariosLivres), marca no Google Agenda antes de registrar.
@@ -697,6 +722,20 @@ function registrarLeadSemAgenda(args: Record<string, unknown>, chatid: string) {
   const assunto: Assunto = ASSUNTOS.includes(args.assunto as Assunto)
     ? (args.assunto as Assunto)
     : "atendimento";
+  // Mexico chegava no grupo como "Cliente: nao informado". Cobra o nome uma vez.
+  const cidadeMexico = normalizar(String(args.cidade ?? "")).includes("mexico");
+  // O modelo chegou a por a cidade no lugar do nome ("Pachuca"): conta como sem nome.
+  const nomeDado = normalizar(String(args.nome ?? ""));
+  const cidadeDada = normalizar(String(args.cidade ?? ""));
+  const nomeEhCidade = !!nomeDado && (cidadeDada.includes(nomeDado) || nomeDado.includes(cidadeDada.replace(/ mexico$/, "")));
+  if (nomeEhCidade) args.nome = "";
+  if (cidadeMexico && !anterior && !String(args.nome ?? "").trim() && !NOME_JA_COBRADO.has(chatid)) {
+    NOME_JA_COBRADO.add(chatid);
+    return {
+      ok: false,
+      instrucao: "NAO registrado: falta o nome. Pergunte so o nome dela (uma pergunta) e registre depois. Nao diga que passou para a equipe.",
+    };
+  }
   // Remarcar, queixa, fornecedor, vaga: passa na hora, nao e venda para "encerrar".
   if (
     !querMarcar &&

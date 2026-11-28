@@ -87,12 +87,27 @@ export function resetarSessao(chatid: string): void {
  * mecanico na saida, porque instrucao falha de vez em quando e isto aqui nao.
  */
 function limpar(texto: string): string {
-  return texto
+  const limpo = texto
     .replace(/\r\n/g, "\n")
     .replace(/\n{2,}/g, " ") // paragrafo vira continuacao da frase
     .replace(/^\s*[-*]\s+/gm, "") // marcador de lista que escapou
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+  // Resposta em espanhol: palavras em portugues que o modelo deixava escapar (visto em conversa real).
+  if (!/[¿¡]|\b(tienes|quieres|cómo|está|gracias|equipo|valoración)\b/i.test(limpo)) return limpo;
+  return limpo
+    .replace(/\botomod\p{L}*/giu, (m) => (m[0] === "O" ? "Otomodelación" : "otomodelación"))
+    .replace(/\batendimento\b/gi, "atención")
+    .replace(/\bpasso a passo\b/gi, "paso a paso")
+    .replace(/\bpaso a passo\b/gi, "paso a paso")
+    .replace(/\bequipo de M[eé]xico\b/gi, "equipo")
+    .replace(/\bpreenchimento labial\b/gi, "relleno de labios")
+    .replace(/\btoxina botul[ií]nica \(botox\)/gi, "bótox")
+    .replace(/\bharmoniza[çc][ãa]o facial\b/gi, "armonización facial")
+    .replace(/\bfios de PDO\b/gi, "hilos PDO")
+    .replace(/\bsai (R\$)/g, "sale $1")
+    .replace(/\ba gente no hace\b/gi, "no hacemos")
+    .replace(/\bcir[úu]rgica\b/gi, "quirúrgica");
 }
 
 /** Tamanho atual do historico -- marcador para desfazer o turno se ele nascer velho. */
